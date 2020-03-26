@@ -1,5 +1,5 @@
 # LFA-T1
-first project for LFA
+project 1 for LFA
 
 # Language: Python  
 
