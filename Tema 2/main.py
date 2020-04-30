@@ -25,6 +25,40 @@ def go_to_next_state(states, currentStates, value):
     return result
 
 
+def find_reachable_states(states, statesNumber, initialState):
+    reachableStates = [False]*statesNumber
+    q = queue.Queue(maxsize=0)
+    q.put(initialState)
+    reachableStates[initialState] = True
+    while not q.empty():
+        currentState = q.get()
+        for toStates in states[currentState].values():
+            for toState in toStates:
+                if reachableStates[toState] is False:
+                    q.put(toState)
+                    reachableStates[toState] = True
+
+    return reachableStates
+
+
+def find_word_generating_states(reverseTransitionStates, finalStates, statesNumber):
+    wordGeneratingStates = [False]*statesNumber
+    q = queue.Queue(maxsize=0)
+    for finalState in finalStates:
+        q.put(finalState)
+        wordGeneratingStates[finalState] = True
+
+    while not q.empty():
+        currentState = q.get()
+        for state in reverseTransitionStates[currentState]:
+            if wordGeneratingStates[state] is False:
+                q.put(state)
+                wordGeneratingStates[state] = True
+
+    return wordGeneratingStates
+
+
+
 def get_alphabet(states):
     alphabet = set()
     for state in states:
@@ -48,7 +82,7 @@ def get_epsilon_closure(states, statesNumber):
             for state in stateClosure:
                 updatedClosure = updatedClosure.union(statesEpsilonClosure[state])
             if updatedClosure != stateClosure:
-                change = True
+                changed = True
                 statesEpsilonClosure[i] = updatedClosure
     return statesEpsilonClosure
 
@@ -94,6 +128,107 @@ def NFA_to_DFA(nfaStates, statesNumber, alphabet, finalStates):
     return dfaStates, finalStates, statesNumber
 
 
+def remove_redundant_states(states, statesNumber, functionalStates, finalStates):
+    nextFreeState = 0
+    reserializedStates = []
+    minimizeReadyFinalStates = set()
+    for i in range(statesNumber):
+        if functionalStates[i] is True:
+            reserializedStates += [nextFreeState]
+            if i in finalStates:
+                minimizeReadyFinalStates.add(nextFreeState)
+            nextFreeState += 1
+        else:
+            reserializedStates += [-1]
+    minimizeReadyStates = []
+    for i in range(statesNumber):
+        if reserializedStates[i] == -1:
+            statesNumber -= 1
+            continue
+        minimizeReadyStates += [{}]
+        for value, toStates in states[i].items():
+            minimizeReadyToStates = set()
+            for toState in toStates:
+                if reserializedStates[toState] == -1:
+                    continue
+                minimizeReadyToStates.add(reserializedStates[toState])
+            minimizeReadyStates[reserializedStates[i]][value] = minimizeReadyToStates
+    return minimizeReadyStates, statesNumber, minimizeReadyFinalStates
+
+
+def complete_DFA(states, statesNumber, alphabet):
+    completeStates = [{} for _ in range(statesNumber)]
+    sinkState = False
+    for i in range(statesNumber):
+        for value in alphabet:
+            if value in states[i]:
+                completeStates[i][value] = states[i][value].pop()
+            else:
+                sinkState = True
+                completeStates[i][value] = statesNumber
+    if sinkState:
+        completeStates += [{value: statesNumber for value in alphabet}]
+    return completeStates, sinkState
+
+def minimize_DFA(dfaStates, finalStates, statesNumber, initialState):
+    minimizedDfaStates = []
+    minimizedFinalStates = set()
+    minimizedStatesNumber = 2
+
+    if finalStates.__len__() == 0:
+        minimizedDfaStates += [{value: 0 for value in alphabet}]
+        return minimizedDfaStates, minimizedFinalStates, 1, 0
+    if finalStates.__len__() == statesNumber:
+        minimizedDfaStates += [{value: 0 for value in alphabet}]
+        return minimizedDfaStates, set([0]), 1, 0
+
+    minimizedFinalStates.add(0)
+    partition = [finalStates, set()]
+    partitionRep = [0, 0]
+    stateRepartization = []
+    for i in range(statesNumber):
+        if i not in finalStates:
+            stateRepartization += [1]
+            partitionRep[1] = i
+            partition[1].add(i)
+        else:
+            stateRepartization += [0]
+            partitionRep[0] = i
+
+    changed = True
+    while changed:
+        changed = False
+        oldStateRepartization = copy.deepcopy(stateRepartization)
+        updatedPartition = []
+        updatedRep = []
+        for i in range(minimizedStatesNumber):
+            repState = partitionRep[i]
+            newPartition = set()
+            newRepartization = minimizedStatesNumber
+            for state in partition[i]:
+                for value in alphabet:
+                    if oldStateRepartization[dfaStates[state][value]] != oldStateRepartization[dfaStates[repState][value]]:
+                        newPartition.add(state)
+                        newRepresentant = state
+                        changed = True
+                        stateRepartization[state] = newRepartization
+                        minimizedStatesNumber = newRepartization + 1
+                        break
+            if newPartition.__len__() != 0:
+                partition[i] = partition[i].difference(newPartition)
+                partition += [newPartition]
+                partitionRep += [newRepresentant]
+                if i in minimizedFinalStates:
+                    minimizedFinalStates.add(newRepartization)
+
+    for state in partitionRep:
+        minimizedDfaStates += [{value:set([stateRepartization[dfaStates[state][value]]]) for value in alphabet}]
+
+    initialState = stateRepartization[initialState]
+
+    return minimizedDfaStates, minimizedFinalStates, minimizedStatesNumber, initialState
+
+
 # start main
 fin = open("input", "r")
 fout = open("output", "w")
@@ -101,7 +236,7 @@ fout = open("output", "w")
 statesNumber = int(fin.readline())
 transitionsNumber = int(fin.readline())
 states = [{'*' : set([i])} for i in range(statesNumber)]
-reverseTransitionStates = [set() for _ in range(statesNumber)]
+
 
 for transition in range(transitionsNumber):
     line = fin.readline().split()
@@ -113,8 +248,6 @@ for transition in range(transitionsNumber):
         states[stateSt][value] = set([stateFn])
     else:
         states[stateSt][value].add(stateFn)
-
-    reverseTransitionStates[stateFn].add(stateSt)
 
 initialState = int(fin.readline())
 finalStatesNumber = int(fin.readline())
@@ -134,6 +267,9 @@ statesEpsilonClosure = get_epsilon_closure(states, statesNumber)
 for i in range(statesNumber):
     states[i]['*'] = statesEpsilonClosure[i]
 
+if initialState not in finalStates and finalStates.intersection(go_to_next_state(states, set([initialState]), '*')).__len__() != 0:
+    finalStates.add(initialState)
+
 nfaStates = epsilon_NFA_to_NFA(states, statesNumber, alphabet)
 alphabet.remove('*')
 
@@ -147,3 +283,33 @@ fout.write('DFA:\n')
 print_to_output_automat(dfaStates, statesNumber, fout, finalStates, initialState)
 fout.write('\n\n')
 
+reachableStates = find_reachable_states(dfaStates, statesNumber, initialState)
+
+reverseTransitionStates = [set() for _ in range(statesNumber)]
+
+for i in range(statesNumber):
+    for value, toStates in dfaStates[i].items():
+        for toState in toStates:
+            reverseTransitionStates[toState].add(i)
+
+
+wordGeneratingStates = find_word_generating_states(reverseTransitionStates, finalStates, statesNumber)
+
+functionalStates = []
+
+for i in range(statesNumber):
+    if reachableStates[i] == True and wordGeneratingStates[i] == True:
+        functionalStates += [True]
+    else:
+        functionalStates += [False]
+
+minimizeReadyStates, statesNumber, finalStates = remove_redundant_states(dfaStates, statesNumber, functionalStates, finalStates)
+completeStates, sinkState = complete_DFA(minimizeReadyStates, statesNumber, alphabet)
+if sinkState:
+    statesNumber += 1
+
+minimizedDfaStates, finalStates, statesNumber, initialState = minimize_DFA(completeStates, finalStates, statesNumber, initialState)
+
+fout.write('DFA-min:\n')
+print_to_output_automat(minimizedDfaStates, statesNumber, fout, finalStates, initialState)
+fout.write('\n\n')
