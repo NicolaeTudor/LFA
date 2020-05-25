@@ -1,0 +1,17 @@
+5
+13
+S A a
+S B b
+S D0 b
+S D0 a
+A A a
+A S a
+A D0 a
+B S c
+B D0 c
+S1 A a
+S1 B b
+S1 D0 b
+S1 D0 a
+2
+['D0', 'S1']
